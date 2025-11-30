@@ -57,7 +57,7 @@ function App() {
     setCurrentConversationId(id);
   };
 
-  const handleSendMessage = async (content) => {
+  const handleSendMessage = async (content, mode) => {
     if (!currentConversationId) return;
 
     setIsLoading(true);
@@ -69,19 +69,33 @@ function App() {
         messages: [...prev.messages, userMessage],
       }));
 
-      // Create a partial assistant message that will be updated progressively
-      const assistantMessage = {
-        role: 'assistant',
-        stage1: null,
-        stage2: null,
-        stage3: null,
-        metadata: null,
-        loading: {
-          stage1: false,
-          stage2: false,
-          stage3: false,
-        },
-      };
+      // Determine effective mode - first message is always council mode
+      const isFirstMessage = currentConversation.messages.length === 0;
+      const effectiveMode = isFirstMessage ? 'council' : mode;
+
+      // Create a partial assistant message based on mode
+      let assistantMessage;
+      if (effectiveMode === 'chairman') {
+        assistantMessage = {
+          role: 'assistant',
+          chairman_response: null,
+          isLoading: true,
+        };
+      } else {
+        // Council mode
+        assistantMessage = {
+          role: 'assistant',
+          stage1: null,
+          stage2: null,
+          stage3: null,
+          metadata: null,
+          loading: {
+            stage1: false,
+            stage2: false,
+            stage3: false,
+          },
+        };
+      }
 
       // Add the partial assistant message
       setCurrentConversation((prev) => ({
@@ -89,8 +103,8 @@ function App() {
         messages: [...prev.messages, assistantMessage],
       }));
 
-      // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
+      // Send message with streaming, passing the mode
+      await api.sendMessageStream(currentConversationId, content, effectiveMode, (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
             setCurrentConversation((prev) => {
@@ -146,6 +160,26 @@ function App() {
               const lastMsg = messages[messages.length - 1];
               lastMsg.stage3 = event.data;
               lastMsg.loading.stage3 = false;
+              return { ...prev, messages };
+            });
+            break;
+
+          case 'chairman_start':
+            // Chairman mode started (optional, could set loading state)
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              lastMsg.isLoading = true;
+              return { ...prev, messages };
+            });
+            break;
+
+          case 'chairman_complete':
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              lastMsg.chairman_response = event.data;
+              lastMsg.isLoading = false;
               return { ...prev, messages };
             });
             break;

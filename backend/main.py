@@ -4,13 +4,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
 import json
 import asyncio
 
 from . import storage
-from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .storage import get_conversation, add_user_message, add_assistant_message, add_chairman_message, update_conversation_title
+from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings, chat_with_chairman, format_history_summary
 
 app = FastAPI(title="LLM Council API")
 
@@ -29,9 +30,10 @@ class CreateConversationRequest(BaseModel):
     pass
 
 
-class SendMessageRequest(BaseModel):
+class MessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
+    mode: Optional[str] = None  # "chairman" or "council"
 
 
 class ConversationMetadata(BaseModel):
@@ -48,6 +50,20 @@ class Conversation(BaseModel):
     created_at: str
     title: str
     messages: List[Dict[str, Any]]
+
+
+def build_conversation_history(messages: List[Dict]) -> List[Dict[str, str]]:
+    """Convert stored messages to OpenRouter chat format."""
+    history = []
+    for msg in messages:
+        if msg["role"] == "user":
+            history.append({"role": "user", "content": msg["content"]})
+        elif msg["role"] == "assistant":
+            if msg.get("stage3"):
+                history.append({"role": "assistant", "content": msg["stage3"]["response"]})
+            elif msg.get("chairman_response"):
+                history.append({"role": "assistant", "content": msg["chairman_response"]["response"]})
+    return history
 
 
 @app.get("/")
@@ -80,105 +96,126 @@ async def get_conversation(conversation_id: str):
 
 
 @app.post("/api/conversations/{conversation_id}/message")
-async def send_message(conversation_id: str, request: SendMessageRequest):
+async def send_message(conversation_id: str, request: MessageRequest):
     """
-    Send a message and run the 3-stage council process.
-    Returns the complete response with all stages.
+    Send a message and route to appropriate handler based on mode.
+    First message always uses council mode. Subsequent messages default to chairman.
     """
-    # Check if conversation exists
-    conversation = storage.get_conversation(conversation_id)
+    conversation = get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Check if this is the first message
+    # Build conversation history before adding new message
+    history = build_conversation_history(conversation["messages"])
+
+    # Add the new user message
+    add_user_message(conversation_id, request.content)
+
+    # Determine mode (first message always council, otherwise default to chairman)
     is_first_message = len(conversation["messages"]) == 0
+    mode = "council" if is_first_message else (request.mode or "chairman")
 
-    # Add user message
-    storage.add_user_message(conversation_id, request.content)
+    if mode == "council":
+        # Full 3-stage pipeline
+        stage1, stage2, stage3, metadata = await run_full_council(
+            request.content,
+            history if not is_first_message else None
+        )
+        add_assistant_message(conversation_id, stage1, stage2, stage3)
 
-    # If this is the first message, generate a title
-    if is_first_message:
-        title = await generate_conversation_title(request.content)
-        storage.update_conversation_title(conversation_id, title)
+        # Generate title if first message
+        if is_first_message:
+            title = await generate_conversation_title(request.content)
+            update_conversation_title(conversation_id, title)
 
-    # Run the 3-stage council process
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
-    )
-
-    # Add assistant message with all stages
-    storage.add_assistant_message(
-        conversation_id,
-        stage1_results,
-        stage2_results,
-        stage3_result
-    )
-
-    # Return the complete response with metadata
-    return {
-        "stage1": stage1_results,
-        "stage2": stage2_results,
-        "stage3": stage3_result,
-        "metadata": metadata
-    }
+        return {
+            "stage1": stage1,
+            "stage2": stage2,
+            "stage3": stage3,
+            "metadata": metadata,
+            "mode": "council"
+        }
+    else:
+        # Chairman-only response
+        result = await chat_with_chairman(request.content, history)
+        add_chairman_message(conversation_id, result)
+        return {
+            "chairman_response": result,
+            "mode": "chairman"
+        }
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")
-async def send_message_stream(conversation_id: str, request: SendMessageRequest):
+async def send_message_stream(conversation_id: str, request: MessageRequest):
     """
-    Send a message and stream the 3-stage council process.
+    Send a message and stream the response with mode routing.
     Returns Server-Sent Events as each stage completes.
     """
     # Check if conversation exists
-    conversation = storage.get_conversation(conversation_id)
+    conversation = get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Check if this is the first message
-    is_first_message = len(conversation["messages"]) == 0
-
     async def event_generator():
         try:
-            # Add user message
-            storage.add_user_message(conversation_id, request.content)
+            # Build history before adding new message
+            history = build_conversation_history(conversation["messages"])
+            is_first_message = len(conversation["messages"]) == 0
+            mode = "council" if is_first_message else (request.mode or "chairman")
 
-            # Start title generation in parallel (don't await yet)
-            title_task = None
-            if is_first_message:
-                title_task = asyncio.create_task(generate_conversation_title(request.content))
+            add_user_message(conversation_id, request.content)
 
-            # Stage 1: Collect responses
-            yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
+            if mode == "chairman":
+                yield f"data: {json.dumps({'type': 'chairman_start'})}\n\n"
 
-            # Stage 2: Collect rankings
-            yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
-            aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+                result = await chat_with_chairman(request.content, history)
+                add_chairman_message(conversation_id, result)
 
-            # Stage 3: Synthesize final answer
-            yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
-            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
+                yield f"data: {json.dumps({'type': 'chairman_complete', 'data': result})}\n\n"
+                yield f"data: {json.dumps({'type': 'complete', 'mode': 'chairman'})}\n\n"
+            else:
+                # Start title generation in parallel (don't await yet)
+                title_task = None
+                if is_first_message:
+                    title_task = asyncio.create_task(generate_conversation_title(request.content))
 
-            # Wait for title generation if it was started
-            if title_task:
-                title = await title_task
-                storage.update_conversation_title(conversation_id, title)
-                yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
+                # Generate context summary for stages 2 and 3 if we have history
+                context_summary = None
+                if history:
+                    context_summary = format_history_summary(history)
 
-            # Save complete assistant message
-            storage.add_assistant_message(
-                conversation_id,
-                stage1_results,
-                stage2_results,
-                stage3_result
-            )
+                # Stage 1: Collect responses
+                yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
+                stage1_results = await stage1_collect_responses(request.content, history if not is_first_message else None)
+                yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
-            # Send completion event
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                # Stage 2: Collect rankings
+                yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+                stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results, context_summary)
+                aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+                yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+
+                # Stage 3: Synthesize final answer
+                yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
+                stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, context_summary)
+                yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
+
+                # Wait for title generation if it was started
+                if title_task:
+                    title = await title_task
+                    update_conversation_title(conversation_id, title)
+                    yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
+
+                # Save complete assistant message
+                add_assistant_message(
+                    conversation_id,
+                    stage1_results,
+                    stage2_results,
+                    stage3_result
+                )
+
+                # Send completion event
+                yield f"data: {json.dumps({'type': 'complete', 'mode': 'council'})}\n\n"
 
         except Exception as e:
             # Send error event

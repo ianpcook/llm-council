@@ -156,6 +156,26 @@ def add_assistant_message(
     save_conversation(conversation)
 
 
+def add_chairman_message(conversation_id: str, chairman_response: Dict[str, Any]) -> None:
+    """
+    Add a chairman-only assistant message to a conversation.
+
+    Args:
+        conversation_id: Conversation identifier
+        chairman_response: Chairman's response dict
+    """
+    conversation = get_conversation(conversation_id)
+    if conversation is None:
+        raise ValueError(f"Conversation {conversation_id} not found")
+
+    conversation["messages"].append({
+        "role": "assistant",
+        "chairman_response": chairman_response
+    })
+
+    save_conversation(conversation)
+
+
 def update_conversation_title(conversation_id: str, title: str):
     """
     Update the title of a conversation.
