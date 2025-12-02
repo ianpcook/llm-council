@@ -10,8 +10,10 @@ import json
 import asyncio
 
 from . import storage
+from . import personalities
 from .storage import get_conversation, add_user_message, add_assistant_message, add_chairman_message, update_conversation_title
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings, chat_with_chairman, format_history_summary
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
 app = FastAPI(title="LLM Council API")
 
@@ -25,9 +27,38 @@ app.add_middleware(
 )
 
 
+class PersonalityConfig(BaseModel):
+    """Configuration for personality assignments in a conversation."""
+    mode: str  # "all_same" | "each_different" | "none"
+    council_assignments: Optional[Dict[str, str]] = None  # model_id -> personality_id
+    chairman_personality_id: Optional[str] = None
+    shuffle_each_turn: bool = False
+
+
+class Personality(BaseModel):
+    """Personality data for API responses."""
+    id: str
+    name: str
+    type: str  # "simple" | "detailed"
+    role: str
+    expertise: List[str] = []
+    perspective: str = ""
+    communication_style: str = ""
+
+
+class CreatePersonalityRequest(BaseModel):
+    """Request body for creating a personality."""
+    name: str
+    role: str
+    type: str = "detailed"
+    expertise: List[str] = []
+    perspective: str = ""
+    communication_style: str = ""
+
+
 class CreateConversationRequest(BaseModel):
     """Request to create a new conversation."""
-    pass
+    personality_config: Optional[PersonalityConfig] = None
 
 
 class MessageRequest(BaseModel):
@@ -72,6 +103,73 @@ async def root():
     return {"status": "ok", "service": "LLM Council API"}
 
 
+@app.get("/api/config")
+async def get_config():
+    """Get council configuration (models list)."""
+    return {
+        "council_models": COUNCIL_MODELS,
+        "chairman_model": CHAIRMAN_MODEL
+    }
+
+
+@app.get("/api/personalities", response_model=List[Personality])
+async def list_personalities(type_filter: Optional[str] = None):
+    """List all personalities with optional type filter."""
+    results = personalities.list_personalities(type_filter=type_filter)
+    return [Personality(**p) for p in results]
+
+
+@app.get("/api/personalities/{personality_id}", response_model=Personality)
+async def get_personality(personality_id: str):
+    """Get a specific personality."""
+    personality = personalities.get_personality(personality_id)
+    if personality is None:
+        raise HTTPException(status_code=404, detail="Personality not found")
+    return Personality(**personality)
+
+
+@app.post("/api/personalities", response_model=Personality, status_code=201)
+async def create_personality(request: CreatePersonalityRequest):
+    """Create a new personality."""
+    try:
+        result = personalities.create_personality(
+            name=request.name,
+            role=request.role,
+            personality_type=request.type,
+            expertise=request.expertise,
+            perspective=request.perspective,
+            communication_style=request.communication_style
+        )
+        return Personality(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/personalities/{personality_id}", response_model=Personality)
+async def update_personality(personality_id: str, request: CreatePersonalityRequest):
+    """Update an existing personality."""
+    updated = personalities.update_personality(
+        personality_id,
+        name=request.name,
+        role=request.role,
+        type=request.type,
+        expertise=request.expertise,
+        perspective=request.perspective,
+        communication_style=request.communication_style
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Personality not found")
+    return Personality(**updated)
+
+
+@app.delete("/api/personalities/{personality_id}")
+async def delete_personality(personality_id: str):
+    """Delete a personality."""
+    if not personalities.delete_personality(personality_id):
+        raise HTTPException(status_code=404, detail="Personality not found")
+    return {"status": "deleted", "id": personality_id}
+
+
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
 async def list_conversations():
     """List all conversations (metadata only)."""
@@ -82,7 +180,9 @@ async def list_conversations():
 async def create_conversation(request: CreateConversationRequest):
     """Create a new conversation."""
     conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
+    # Convert Pydantic model to dict if present
+    personality_config = request.personality_config.model_dump() if request.personality_config else None
+    conversation = storage.create_conversation(conversation_id, personality_config=personality_config)
     return conversation
 
 
@@ -116,10 +216,14 @@ async def send_message(conversation_id: str, request: MessageRequest):
     mode = "council" if is_first_message else (request.mode or "chairman")
 
     if mode == "council":
+        # Get personality config from conversation
+        personality_config = conversation.get("personality_config")
+
         # Full 3-stage pipeline
         stage1, stage2, stage3, metadata = await run_full_council(
             request.content,
-            history if not is_first_message else None
+            history if not is_first_message else None,
+            personality_config
         )
         add_assistant_message(conversation_id, stage1, stage2, stage3)
 
@@ -174,6 +278,9 @@ async def send_message_stream(conversation_id: str, request: MessageRequest):
                 yield f"data: {json.dumps({'type': 'chairman_complete', 'data': result})}\n\n"
                 yield f"data: {json.dumps({'type': 'complete', 'mode': 'chairman'})}\n\n"
             else:
+                # Get personality config from conversation
+                personality_config = conversation.get("personality_config")
+
                 # Start title generation in parallel (don't await yet)
                 title_task = None
                 if is_first_message:
@@ -186,18 +293,24 @@ async def send_message_stream(conversation_id: str, request: MessageRequest):
 
                 # Stage 1: Collect responses
                 yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-                stage1_results = await stage1_collect_responses(request.content, history if not is_first_message else None)
+                stage1_results = await stage1_collect_responses(request.content, history if not is_first_message else None, personality_config)
                 yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
                 # Stage 2: Collect rankings
                 yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-                stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results, context_summary)
+                stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results, context_summary, personality_config)
                 aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
                 yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
                 # Stage 3: Synthesize final answer
                 yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-                stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, context_summary)
+
+                # Get chairman personality if configured
+                chairman_personality = None
+                if personality_config and personality_config.get('chairman_personality_id'):
+                    chairman_personality = personalities.get_personality(personality_config['chairman_personality_id'])
+
+                stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, context_summary, chairman_personality)
                 yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
                 # Wait for title generation if it was started

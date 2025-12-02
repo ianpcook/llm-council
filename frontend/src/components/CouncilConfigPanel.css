@@ -1,0 +1,320 @@
+/* CouncilConfigPanel.css */
+
+.council-config-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.council-config-content {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.council-config-header {
+  margin-bottom: 24px;
+}
+
+.council-config-header h2 {
+  margin: 0 0 8px 0;
+  color: #333;
+}
+
+.council-config-header p {
+  margin: 0;
+  color: #666;
+  font-size: 14px;
+}
+
+/* Mode Selection */
+.mode-selection {
+  margin-bottom: 24px;
+}
+
+.mode-selection h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #333;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.mode-options {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mode-option {
+  flex: 1;
+  min-width: 150px;
+  padding: 12px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.mode-option:hover {
+  border-color: #4a90e2;
+}
+
+.mode-option.selected {
+  border-color: #4a90e2;
+  background: #e8f4fc;
+}
+
+.mode-option-label {
+  display: block;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.mode-option-description {
+  font-size: 12px;
+  color: #666;
+}
+
+/* Model Assignment Grid */
+.model-assignments {
+  margin-bottom: 24px;
+}
+
+.model-assignments h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #333;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.assignment-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.assignment-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #f8f8f8;
+  border-radius: 8px;
+}
+
+.model-name {
+  flex: 1;
+  font-family: monospace;
+  font-size: 13px;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.personality-select {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+}
+
+.personality-select:focus {
+  outline: none;
+  border-color: #4a90e2;
+}
+
+/* Shuffle Features */
+.shuffle-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 12px;
+  background: #f0f7ff;
+  border-radius: 8px;
+}
+
+.shuffle-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #4a90e2;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.shuffle-btn:hover {
+  background: #357abd;
+}
+
+.shuffle-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.shuffle-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #333;
+}
+
+.shuffle-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.shuffle-tooltip {
+  font-size: 12px;
+  color: #666;
+}
+
+/* Chairman Section */
+.chairman-section {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: linear-gradient(135deg, #f0fff0 0%, #e8f5e9 100%);
+  border: 1px solid #c8e6c9;
+  border-radius: 8px;
+}
+
+.chairman-section h3 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: #2e7d32;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.chairman-section p {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: #666;
+}
+
+.chairman-select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #a5d6a7;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+}
+
+.chairman-select:focus {
+  outline: none;
+  border-color: #4caf50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+/* Action Buttons */
+.config-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.config-actions-left {
+  display: flex;
+  gap: 10px;
+}
+
+.config-actions-right {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #4a90e2;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: underline;
+}
+
+.btn-link:hover {
+  color: #357abd;
+}
+
+.btn-cancel {
+  padding: 10px 20px;
+  background: #f0f0f0;
+  color: #333;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.btn-cancel:hover {
+  background: #e0e0e0;
+}
+
+.btn-start {
+  padding: 10px 24px;
+  background: #4a90e2;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.btn-start:hover {
+  background: #357abd;
+}
+
+.btn-start:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+/* Single Personality Selector (for "Same for All" mode) */
+.single-assignment {
+  margin-bottom: 24px;
+}
+
+.single-assignment label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #333;
+}
+
+.single-assignment select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+}

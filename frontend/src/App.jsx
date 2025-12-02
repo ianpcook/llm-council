@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import CouncilConfigPanel from './components/CouncilConfigPanel';
+import PersonalityManager from './components/PersonalityManager';
 import { api } from './api';
 import './App.css';
 
@@ -9,10 +11,16 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [personalities, setPersonalities] = useState([]);
+  const [councilConfig, setCouncilConfig] = useState(null);
+  const [showConfigPanel, setShowConfigPanel] = useState(false);
+  const [showPersonalityManager, setShowPersonalityManager] = useState(false);
 
   // Load conversations on mount
   useEffect(() => {
     loadConversations();
+    loadPersonalities();
+    loadCouncilConfig();
   }, []);
 
   // Load conversation details when selected
@@ -40,17 +48,54 @@ function App() {
     }
   };
 
-  const handleNewConversation = async () => {
+  const loadPersonalities = async () => {
     try {
-      const newConv = await api.createConversation();
+      const data = await api.listPersonalities();
+      setPersonalities(data);
+    } catch (error) {
+      console.error('Failed to load personalities:', error);
+    }
+  };
+
+  const loadCouncilConfig = async () => {
+    try {
+      const config = await api.getConfig();
+      setCouncilConfig(config);
+    } catch (error) {
+      console.error('Failed to load council config:', error);
+    }
+  };
+
+  const handleNewConversation = () => {
+    setShowConfigPanel(true);
+  };
+
+  const handleConfigConfirm = async (personalityConfig) => {
+    try {
+      const newConv = await api.createConversation(personalityConfig);
       setConversations([
-        { id: newConv.id, created_at: newConv.created_at, message_count: 0 },
+        { id: newConv.id, created_at: newConv.created_at, title: newConv.title || 'New Conversation', message_count: 0 },
         ...conversations,
       ]);
       setCurrentConversationId(newConv.id);
+      setShowConfigPanel(false);
     } catch (error) {
       console.error('Failed to create conversation:', error);
     }
+  };
+
+  const handleConfigCancel = () => {
+    setShowConfigPanel(false);
+  };
+
+  const handleManagePersonalities = () => {
+    setShowPersonalityManager(true);
+  };
+
+  const handleClosePersonalityManager = () => {
+    setShowPersonalityManager(false);
+    // Refresh personalities list in case changes were made
+    loadPersonalities();
   };
 
   const handleSelectConversation = (id) => {
@@ -222,12 +267,31 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onManagePersonalities={handleManagePersonalities}
       />
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
       />
+
+      {showConfigPanel && (
+        <CouncilConfigPanel
+          personalities={personalities}
+          councilModels={councilConfig?.council_models || []}
+          onConfirm={handleConfigConfirm}
+          onCancel={handleConfigCancel}
+          onManagePersonalities={handleManagePersonalities}
+        />
+      )}
+
+      {showPersonalityManager && (
+        <div className="modal-overlay" onClick={handleClosePersonalityManager}>
+          <div className="modal-content" style={{maxWidth: '900px', width: '90%'}} onClick={e => e.stopPropagation()}>
+            <PersonalityManager onClose={handleClosePersonalityManager} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,13 +1,15 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .personalities import get_personality, build_personality_prompt, shuffle_assignments, list_personalities
 
 
 async def stage1_collect_responses(
     user_query: str,
-    conversation_history: List[Dict[str, str]] = None
+    conversation_history: List[Dict[str, str]] = None,
+    personality_config: Dict[str, Any] = None
 ) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
@@ -15,25 +17,59 @@ async def stage1_collect_responses(
     Args:
         user_query: The user's question
         conversation_history: Optional list of prior messages (with 'role' and 'content' keys)
+        personality_config: Optional personality configuration for council members
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    # Build messages from history + new query
-    messages = list(conversation_history or [])
-    messages.append({"role": "user", "content": user_query})
+    # Build base messages from history + new query
+    base_messages = list(conversation_history or [])
+    base_messages.append({"role": "user", "content": user_query})
 
-    # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Get personality assignments if configured
+    council_assignments = {}
+    if personality_config and personality_config.get('council_assignments'):
+        council_assignments = personality_config['council_assignments']
 
-    # Format results
+    # Query each model, potentially with different personality prompts
     stage1_results = []
-    for model, response in responses.items():
-        if response is not None:  # Only include successful responses
-            stage1_results.append({
-                "model": model,
-                "response": response.get('content', '')
-            })
+
+    if council_assignments:
+        # Query models individually with personality-specific system prompts
+        import asyncio
+
+        async def query_with_personality(model: str):
+            personality_id = council_assignments.get(model)
+            personality = get_personality(personality_id) if personality_id else None
+
+            messages = []
+            if personality:
+                persona_prompt = build_personality_prompt(personality, "response")
+                if persona_prompt:
+                    messages.append({"role": "system", "content": persona_prompt})
+            messages.extend(base_messages)
+
+            response = await query_model(model, messages)
+            return model, response
+
+        tasks = [query_with_personality(model) for model in COUNCIL_MODELS]
+        results = await asyncio.gather(*tasks)
+
+        for model, response in results:
+            if response is not None:
+                stage1_results.append({
+                    "model": model,
+                    "response": response.get('content', '')
+                })
+    else:
+        # No personalities - use original parallel query
+        responses = await query_models_parallel(COUNCIL_MODELS, base_messages)
+        for model, response in responses.items():
+            if response is not None:
+                stage1_results.append({
+                    "model": model,
+                    "response": response.get('content', '')
+                })
 
     return stage1_results
 
@@ -41,7 +77,8 @@ async def stage1_collect_responses(
 async def stage2_collect_rankings(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
-    conversation_context: str = None
+    conversation_context: str = None,
+    personality_config: Dict[str, Any] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
@@ -50,6 +87,7 @@ async def stage2_collect_rankings(
         user_query: The original user query
         stage1_results: Results from Stage 1
         conversation_context: Optional conversation history for multi-turn context
+        personality_config: Optional personality configuration for council members
 
     Returns:
         Tuple of (rankings list, label_to_model mapping)
@@ -109,10 +147,36 @@ FINAL RANKING:
 
 Now provide your evaluation and ranking:"""
 
-    messages = [{"role": "user", "content": ranking_prompt}]
+    # Get personality assignments if configured
+    council_assignments = {}
+    if personality_config and personality_config.get('council_assignments'):
+        council_assignments = personality_config['council_assignments']
 
-    # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    if council_assignments:
+        # Query models individually with personality-specific perspectives
+        import asyncio
+
+        async def query_with_perspective(model: str):
+            personality_id = council_assignments.get(model)
+            personality = get_personality(personality_id) if personality_id else None
+
+            messages = []
+            if personality:
+                perspective_prompt = build_personality_prompt(personality, "ranking")
+                if perspective_prompt:
+                    messages.append({"role": "system", "content": perspective_prompt})
+            messages.append({"role": "user", "content": ranking_prompt})
+
+            response = await query_model(model, messages)
+            return model, response
+
+        tasks = [query_with_perspective(model) for model in COUNCIL_MODELS]
+        results = await asyncio.gather(*tasks)
+        responses = {model: response for model, response in results}
+    else:
+        # No personalities - use original parallel query
+        messages = [{"role": "user", "content": ranking_prompt}]
+        responses = await query_models_parallel(COUNCIL_MODELS, messages)
 
     # Format results
     stage2_results = []
@@ -133,7 +197,8 @@ async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
     stage2_results: List[Dict[str, Any]],
-    conversation_context: str = None
+    conversation_context: str = None,
+    chairman_personality: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -184,7 +249,13 @@ Your task as Chairman is to synthesize all of this information into a single, co
 
 Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
 
-    messages = [{"role": "user", "content": chairman_prompt}]
+    # Build messages with optional personality
+    messages = []
+    if chairman_personality:
+        persona_prompt = build_personality_prompt(chairman_personality, "synthesis")
+        if persona_prompt:
+            messages.append({"role": "system", "content": persona_prompt})
+    messages.append({"role": "user", "content": chairman_prompt})
 
     # Query the chairman model
     response = await query_model(CHAIRMAN_MODEL, messages)
@@ -369,7 +440,8 @@ Title:"""
 
 async def run_full_council(
     user_query: str,
-    conversation_history: List[Dict[str, str]] = None
+    conversation_history: List[Dict[str, str]] = None,
+    personality_config: Dict[str, Any] = None
 ) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
@@ -382,13 +454,30 @@ async def run_full_council(
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
+    # Handle shuffle_each_turn
+    actual_personality_config = personality_config
+    if personality_config and personality_config.get('shuffle_each_turn'):
+        # Get all available personality IDs
+        all_personalities = list_personalities()
+        personality_ids = [p['id'] for p in all_personalities]
+
+        if personality_ids:
+            # Shuffle assignments for this turn
+            shuffled_assignments = shuffle_assignments(COUNCIL_MODELS, personality_ids)
+
+            # Create a new config with shuffled assignments
+            actual_personality_config = {
+                **personality_config,
+                'council_assignments': shuffled_assignments
+            }
+
     # Generate context summary for stages 2 and 3 prompts
     context_summary = None
     if conversation_history:
         context_summary = format_history_summary(conversation_history)
 
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query, conversation_history)
+    stage1_results = await stage1_collect_responses(user_query, conversation_history, actual_personality_config)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -399,24 +488,31 @@ async def run_full_council(
 
     # Stage 2: Collect rankings
     stage2_results, label_to_model = await stage2_collect_rankings(
-        user_query, stage1_results, context_summary
+        user_query, stage1_results, context_summary, actual_personality_config
     )
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+
+    # Extract chairman personality if provided
+    chairman_personality = None
+    if personality_config and personality_config.get('chairman'):
+        chairman_personality = get_personality(personality_config['chairman'])
 
     # Stage 3: Synthesize final answer
     stage3_result = await stage3_synthesize_final(
         user_query,
         stage1_results,
         stage2_results,
-        context_summary
+        context_summary,
+        chairman_personality
     )
 
     # Prepare metadata
     metadata = {
         "label_to_model": label_to_model,
-        "aggregate_rankings": aggregate_rankings
+        "aggregate_rankings": aggregate_rankings,
+        "personality_assignments_used": actual_personality_config.get('council_assignments') if actual_personality_config else None
     }
 
     return stage1_results, stage2_results, stage3_result, metadata

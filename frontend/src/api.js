@@ -19,13 +19,13 @@ export const api = {
   /**
    * Create a new conversation.
    */
-  async createConversation() {
+  async createConversation(personalityConfig = null) {
     const response = await fetch(`${API_BASE}/api/conversations`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ personality_config: personalityConfig }),
     });
     if (!response.ok) {
       throw new Error('Failed to create conversation');
@@ -112,5 +112,85 @@ export const api = {
         }
       }
     }
+  },
+
+  /**
+   * List all personalities.
+   */
+  async listPersonalities() {
+    const response = await fetch(`${API_BASE}/api/personalities`);
+    if (!response.ok) {
+      throw new Error('Failed to list personalities');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get a specific personality.
+   */
+  async getPersonality(personalityId) {
+    const response = await fetch(`${API_BASE}/api/personalities/${personalityId}`);
+    if (!response.ok) {
+      throw new Error('Failed to get personality');
+    }
+    return response.json();
+  },
+
+  /**
+   * Create a new personality.
+   */
+  async createPersonality(data) {
+    const response = await fetch(`${API_BASE}/api/personalities`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to create personality');
+    }
+    return response.json();
+  },
+
+  /**
+   * Update a personality.
+   */
+  async updatePersonality(personalityId, data) {
+    const response = await fetch(`${API_BASE}/api/personalities/${personalityId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to update personality');
+    }
+    return response.json();
+  },
+
+  /**
+   * Delete a personality.
+   */
+  async deletePersonality(personalityId) {
+    const response = await fetch(`${API_BASE}/api/personalities/${personalityId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete personality');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get council configuration (models list).
+   */
+  async getConfig() {
+    const response = await fetch(`${API_BASE}/api/config`);
+    if (!response.ok) {
+      throw new Error('Failed to get config');
+    }
+    return response.json();
   },
 };

@@ -76,3 +76,28 @@
   color: #999;
   font-size: 12px;
 }
+
+.sidebar-footer {
+  padding: 16px;
+  border-top: 1px solid #e0e0e0;
+  background: #f8f8f8;
+}
+
+.manage-personalities-btn {
+  width: 100%;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #4a90e2;
+  border-radius: 6px;
+  color: #4a90e2;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.manage-personalities-btn:hover {
+  background: #e8f0fe;
+  border-color: #357abd;
+  color: #357abd;
+}
