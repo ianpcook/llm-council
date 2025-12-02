@@ -3,16 +3,27 @@ import ReactMarkdown from 'react-markdown';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
+import DocumentPanel from './DocumentPanel';
 import './ChatInterface.css';
 
 export default function ChatInterface({
   conversation,
   onSendMessage,
   isLoading,
+  documents,           // Array of document metadata
+  onDocumentUpload,    // (file) => Promise
+  onDocumentDelete,    // (docId) => Promise
+  onDocumentToggle,    // (docId, isActive) => Promise
 }) {
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('chairman');
+  const [showDocuments, setShowDocuments] = useState(false);
+  const [includeDocuments, setIncludeDocuments] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const activeDocuments = documents?.filter(d => d.is_active) || [];
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -22,10 +33,46 @@ export default function ChatInterface({
     scrollToBottom();
   }, [conversation]);
 
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    for (const file of files) {
+      try {
+        await onDocumentUpload(file);
+      } catch (error) {
+        console.error('Failed to upload:', file.name);
+      }
+    }
+  };
+
+  const handleFileSelect = async (e) => {
+    const files = Array.from(e.target.files);
+    for (const file of files) {
+      try {
+        await onDocumentUpload(file);
+      } catch (error) {
+        console.error('Failed to upload:', file.name);
+      }
+    }
+    e.target.value = '';
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (input.trim() && !isLoading) {
-      onSendMessage(input, mode);
+      onSendMessage(input, mode, includeDocuments);
       setInput('');
     }
   };
@@ -50,7 +97,39 @@ export default function ChatInterface({
   }
 
   return (
-    <div className="chat-interface">
+    <div
+      className="chat-interface"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="drop-overlay">
+          <div className="drop-content">
+            <span>Drop files to upload</span>
+          </div>
+        </div>
+      )}
+
+      {documents?.length > 0 && (
+        <button
+          className="documents-toggle"
+          onClick={() => setShowDocuments(!showDocuments)}
+        >
+          📄 {activeDocuments.length} Active
+        </button>
+      )}
+
+      {showDocuments && (
+        <DocumentPanel
+          documents={documents || []}
+          onUpload={onDocumentUpload}
+          onDelete={onDocumentDelete}
+          onToggle={onDocumentToggle}
+          onClose={() => setShowDocuments(false)}
+        />
+      )}
+
       <div className="messages-container">
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
@@ -164,6 +243,18 @@ export default function ChatInterface({
       )}
 
       <form className="input-form" onSubmit={handleSubmit}>
+        {activeDocuments.length > 0 && (
+          <div className="document-context-bar">
+            <label className="include-docs-toggle">
+              <input
+                type="checkbox"
+                checked={includeDocuments}
+                onChange={(e) => setIncludeDocuments(e.target.checked)}
+              />
+              <span>Include {activeDocuments.length} document{activeDocuments.length !== 1 ? 's' : ''}</span>
+            </label>
+          </div>
+        )}
         <textarea
           className="message-input"
           placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
@@ -174,12 +265,28 @@ export default function ChatInterface({
           rows={3}
         />
         <button
+          type="button"
+          className="upload-btn"
+          onClick={() => fileInputRef.current?.click()}
+          title="Upload document"
+        >
+          📎
+        </button>
+        <button
           type="submit"
           className="send-button"
           disabled={!input.trim() || isLoading}
         >
           {mode === 'council' && conversation.messages.length > 0 ? 'Ask Council' : 'Send'}
         </button>
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileSelect}
+          multiple
+          accept=".pdf,.docx,.txt,.md,.pptx,.png,.jpg,.jpeg,.gif,.webp"
+          style={{ display: 'none' }}
+        />
       </form>
     </div>
   );

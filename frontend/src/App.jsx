@@ -15,12 +15,14 @@ function App() {
   const [councilConfig, setCouncilConfig] = useState(null);
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [showPersonalityManager, setShowPersonalityManager] = useState(false);
+  const [documents, setDocuments] = useState([]);
 
   // Load conversations on mount
   useEffect(() => {
     loadConversations();
     loadPersonalities();
     loadCouncilConfig();
+    loadDocuments();
   }, []);
 
   // Load conversation details when selected
@@ -66,6 +68,15 @@ function App() {
     }
   };
 
+  const loadDocuments = async () => {
+    try {
+      const data = await api.getDocuments();
+      setDocuments(data.documents || []);
+    } catch (error) {
+      console.error('Failed to load documents:', error);
+    }
+  };
+
   const handleNewConversation = () => {
     setShowConfigPanel(true);
   };
@@ -102,7 +113,35 @@ function App() {
     setCurrentConversationId(id);
   };
 
-  const handleSendMessage = async (content, mode) => {
+  const handleDocumentUpload = async (file) => {
+    try {
+      await api.uploadDocument(file);
+      await loadDocuments();
+    } catch (error) {
+      console.error('Failed to upload document:', error);
+      throw error;  // Re-throw so ChatInterface can handle it
+    }
+  };
+
+  const handleDocumentDelete = async (docId) => {
+    try {
+      await api.deleteDocument(docId);
+      await loadDocuments();
+    } catch (error) {
+      console.error('Failed to delete document:', error);
+    }
+  };
+
+  const handleDocumentToggle = async (docId, isActive) => {
+    try {
+      await api.toggleDocument(docId, isActive);
+      await loadDocuments();
+    } catch (error) {
+      console.error('Failed to toggle document:', error);
+    }
+  };
+
+  const handleSendMessage = async (content, mode, includeDocuments = true) => {
     if (!currentConversationId) return;
 
     setIsLoading(true);
@@ -148,7 +187,7 @@ function App() {
         messages: [...prev.messages, assistantMessage],
       }));
 
-      // Send message with streaming, passing the mode
+      // Send message with streaming, passing the mode and includeDocuments
       await api.sendMessageStream(currentConversationId, content, effectiveMode, (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
@@ -248,7 +287,7 @@ function App() {
           default:
             console.log('Unknown event type:', eventType);
         }
-      });
+      }, includeDocuments);
     } catch (error) {
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error
@@ -273,6 +312,10 @@ function App() {
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
+        documents={documents}
+        onDocumentUpload={handleDocumentUpload}
+        onDocumentDelete={handleDocumentDelete}
+        onDocumentToggle={handleDocumentToggle}
       />
 
       {showConfigPanel && (

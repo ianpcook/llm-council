@@ -1,6 +1,6 @@
 """FastAPI backend for LLM Council."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -11,6 +11,7 @@ import asyncio
 
 from . import storage
 from . import personalities
+from . import documents
 from .storage import get_conversation, add_user_message, add_assistant_message, add_chairman_message, update_conversation_title
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings, chat_with_chairman, format_history_summary
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
@@ -65,6 +66,12 @@ class MessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
     mode: Optional[str] = None  # "chairman" or "council"
+    include_documents: Optional[bool] = True  # Whether to include active documents in context
+
+
+class ToggleDocumentRequest(BaseModel):
+    """Request to toggle document active status."""
+    is_active: bool
 
 
 class ConversationMetadata(BaseModel):
@@ -170,6 +177,65 @@ async def delete_personality(personality_id: str):
     return {"status": "deleted", "id": personality_id}
 
 
+# Document endpoints
+
+@app.get("/api/documents")
+async def list_documents():
+    """List all uploaded documents."""
+    return {"documents": documents.list_documents()}
+
+
+@app.post("/api/documents/upload")
+async def upload_document(file: UploadFile = File(...)):
+    """Upload a new document."""
+    try:
+        content = await file.read()
+        metadata = await documents.save_document(content, file.filename)
+        return {"success": True, "document": metadata}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@app.get("/api/documents/types")
+async def get_supported_types():
+    """Get list of supported document types."""
+    return {"types": list(documents.SUPPORTED_EXTENSIONS.keys())}
+
+
+@app.get("/api/documents/{doc_id}")
+async def get_document_details(doc_id: str):
+    """Get document details including text preview."""
+    doc = documents.get_document(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Add full text for detail view
+    text = documents.get_document_text(doc_id)
+    result = doc.copy()
+    result["text"] = text or ""
+    return result
+
+
+@app.delete("/api/documents/{doc_id}")
+async def delete_document_endpoint(doc_id: str):
+    """Delete a document."""
+    success = documents.delete_document(doc_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"success": True}
+
+
+@app.patch("/api/documents/{doc_id}/toggle")
+async def toggle_document_endpoint(doc_id: str, request: ToggleDocumentRequest):
+    """Toggle document active status."""
+    success = documents.toggle_document_active(doc_id, request.is_active)
+    if not success:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"success": True, "is_active": request.is_active}
+
+
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
 async def list_conversations():
     """List all conversations (metadata only)."""
@@ -211,6 +277,13 @@ async def send_message(conversation_id: str, request: MessageRequest):
     # Add the new user message
     add_user_message(conversation_id, request.content)
 
+    # Build query with document context if requested
+    query_content = request.content
+    if request.include_documents:
+        doc_context = documents.get_active_documents_context()
+        if doc_context:
+            query_content = f"{doc_context}\n\n---\n\nUser Question: {request.content}"
+
     # Determine mode (first message always council, otherwise default to chairman)
     is_first_message = len(conversation["messages"]) == 0
     mode = "council" if is_first_message else (request.mode or "chairman")
@@ -221,7 +294,7 @@ async def send_message(conversation_id: str, request: MessageRequest):
 
         # Full 3-stage pipeline
         stage1, stage2, stage3, metadata = await run_full_council(
-            request.content,
+            query_content,
             history if not is_first_message else None,
             personality_config
         )
@@ -241,7 +314,7 @@ async def send_message(conversation_id: str, request: MessageRequest):
         }
     else:
         # Chairman-only response
-        result = await chat_with_chairman(request.content, history)
+        result = await chat_with_chairman(query_content, history)
         add_chairman_message(conversation_id, result)
         return {
             "chairman_response": result,
@@ -269,10 +342,17 @@ async def send_message_stream(conversation_id: str, request: MessageRequest):
 
             add_user_message(conversation_id, request.content)
 
+            # Build query with document context if requested
+            query_content = request.content
+            if request.include_documents:
+                doc_context = documents.get_active_documents_context()
+                if doc_context:
+                    query_content = f"{doc_context}\n\n---\n\nUser Question: {request.content}"
+
             if mode == "chairman":
                 yield f"data: {json.dumps({'type': 'chairman_start'})}\n\n"
 
-                result = await chat_with_chairman(request.content, history)
+                result = await chat_with_chairman(query_content, history)
                 add_chairman_message(conversation_id, result)
 
                 yield f"data: {json.dumps({'type': 'chairman_complete', 'data': result})}\n\n"
@@ -293,12 +373,12 @@ async def send_message_stream(conversation_id: str, request: MessageRequest):
 
                 # Stage 1: Collect responses
                 yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-                stage1_results = await stage1_collect_responses(request.content, history if not is_first_message else None, personality_config)
+                stage1_results = await stage1_collect_responses(query_content, history if not is_first_message else None, personality_config)
                 yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
                 # Stage 2: Collect rankings
                 yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-                stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results, context_summary, personality_config)
+                stage2_results, label_to_model = await stage2_collect_rankings(query_content, stage1_results, context_summary, personality_config)
                 aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
                 yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
@@ -310,7 +390,7 @@ async def send_message_stream(conversation_id: str, request: MessageRequest):
                 if personality_config and personality_config.get('chairman_personality_id'):
                     chairman_personality = personalities.get_personality(personality_config['chairman_personality_id'])
 
-                stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, context_summary, chairman_personality)
+                stage3_result = await stage3_synthesize_final(query_content, stage1_results, stage2_results, context_summary, chairman_personality)
                 yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
                 # Wait for title generation if it was started

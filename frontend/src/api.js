@@ -72,9 +72,10 @@ export const api = {
    * @param {string} content - The message content
    * @param {string|null} mode - The conversation mode (single-turn or multi-turn)
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
+   * @param {boolean} includeDocuments - Whether to include active documents as context
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, mode, onEvent) {
+  async sendMessageStream(conversationId, content, mode, onEvent, includeDocuments = true) {
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}/message/stream`,
       {
@@ -82,7 +83,7 @@ export const api = {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content, mode }),
+        body: JSON.stringify({ content, mode, include_documents: includeDocuments }),
       }
     );
 
@@ -190,6 +191,91 @@ export const api = {
     const response = await fetch(`${API_BASE}/api/config`);
     if (!response.ok) {
       throw new Error('Failed to get config');
+    }
+    return response.json();
+  },
+
+  // Document APIs
+
+  /**
+   * List all documents.
+   */
+  async getDocuments() {
+    const response = await fetch(`${API_BASE}/api/documents`);
+    if (!response.ok) {
+      throw new Error('Failed to list documents');
+    }
+    return response.json();
+  },
+
+  /**
+   * Upload a document.
+   * @param {File} file - The file to upload
+   */
+  async uploadDocument(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE}/api/documents/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to upload document');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get document details.
+   */
+  async getDocument(docId) {
+    const response = await fetch(`${API_BASE}/api/documents/${docId}`);
+    if (!response.ok) {
+      throw new Error('Failed to get document');
+    }
+    return response.json();
+  },
+
+  /**
+   * Delete a document.
+   */
+  async deleteDocument(docId) {
+    const response = await fetch(`${API_BASE}/api/documents/${docId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete document');
+    }
+    return response.json();
+  },
+
+  /**
+   * Toggle document active status.
+   */
+  async toggleDocument(docId, isActive) {
+    const response = await fetch(`${API_BASE}/api/documents/${docId}/toggle`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ is_active: isActive }),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to toggle document');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get supported document types.
+   */
+  async getSupportedTypes() {
+    const response = await fetch(`${API_BASE}/api/documents/types`);
+    if (!response.ok) {
+      throw new Error('Failed to get supported types');
     }
     return response.json();
   },
