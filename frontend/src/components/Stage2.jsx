@@ -16,10 +16,22 @@ function deAnonymizeText(text, labelToModel) {
 
 export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
   const [activeTab, setActiveTab] = useState(0);
+  const [copied, setCopied] = useState(false);
 
   if (!rankings || rankings.length === 0) {
     return null;
   }
+
+  const handleCopy = async () => {
+    const text = rankings[activeTab].ranking;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   return (
     <div className="stage stage2">
@@ -44,8 +56,13 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
       </div>
 
       <div className="tab-content">
-        <div className="ranking-model">
-          {rankings[activeTab].model}
+        <div className="tab-content-header">
+          <div className="ranking-model">
+            {rankings[activeTab].model}
+          </div>
+          <button className="copy-btn" onClick={handleCopy} title="Copy to clipboard">
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
         </div>
         <div className="ranking-content markdown-content">
           <ReactMarkdown>

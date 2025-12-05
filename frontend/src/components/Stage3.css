@@ -10,12 +10,34 @@
   border: 1px solid #c8e6c8;
 }
 
+.final-response-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
 .chairman-label {
   color: #2d8a2d;
   font-size: 12px;
   font-family: monospace;
-  margin-bottom: 12px;
   font-weight: 600;
+}
+
+.stage3 .copy-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #e8f5e8;
+  border: 1px solid #c8e6c8;
+  border-radius: 4px;
+  color: #2d8a2d;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.stage3 .copy-btn:hover {
+  background: #d4edd4;
+  border-color: #2d8a2d;
 }
 
 .final-text {
