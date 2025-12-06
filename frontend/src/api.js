@@ -89,9 +89,10 @@ export const api = {
    * @param {string|null} mode - The conversation mode (single-turn or multi-turn)
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
    * @param {boolean} includeDocuments - Whether to include active documents as context
+   * @param {AbortSignal} signal - Optional AbortSignal for cancellation
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, mode, onEvent, includeDocuments = true) {
+  async sendMessageStream(conversationId, content, mode, onEvent, includeDocuments = true, signal = null) {
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}/message/stream`,
       {
@@ -100,6 +101,7 @@ export const api = {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ content, mode, include_documents: includeDocuments }),
+        signal,
       }
     );
 
@@ -110,34 +112,62 @@ export const api = {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        // Check if cancelled before reading
+        if (signal?.aborted) {
+          await reader.cancel();
+          onEvent('cancelled', { message: 'Request cancelled by user' });
+          return;
+        }
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          try {
-            const event = JSON.parse(data);
-            onEvent(event.type, event);
-          } catch (e) {
-            console.error('Failed to parse SSE event:', e);
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            try {
+              const event = JSON.parse(data);
+              onEvent(event.type, event);
+            } catch (e) {
+              console.error('Failed to parse SSE event:', e);
+            }
           }
         }
       }
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        await reader.cancel().catch(() => {});
+        onEvent('cancelled', { message: 'Request cancelled by user' });
+        return;
+      }
+      throw error;
     }
   },
 
   /**
-   * List all personalities.
+   * List all personalities with optional category filter.
    */
-  async listPersonalities() {
-    const response = await fetch(`${API_BASE}/api/personalities`);
+  async listPersonalities(category = null) {
+    const params = category ? `?category=${encodeURIComponent(category)}` : '';
+    const response = await fetch(`${API_BASE}/api/personalities${params}`);
     if (!response.ok) {
       throw new Error('Failed to list personalities');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get personality categories.
+   */
+  async getPersonalityCategories() {
+    const response = await fetch(`${API_BASE}/api/personalities/categories`);
+    if (!response.ok) {
+      throw new Error('Failed to get personality categories');
     }
     return response.json();
   },

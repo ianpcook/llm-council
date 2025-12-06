@@ -18,6 +18,14 @@ from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
 app = FastAPI(title="LLM Council API")
 
+# Initialize seed personalities on startup
+@app.on_event("startup")
+async def startup_event():
+    """Initialize seed personalities when the app starts."""
+    created = personalities.initialize_seed_personalities()
+    if created > 0:
+        print(f"Initialized {created} seed personalities")
+
 # Enable CORS for local development
 app.add_middleware(
     CORSMiddleware,
@@ -41,6 +49,7 @@ class Personality(BaseModel):
     id: str
     name: str
     type: str  # "simple" | "detailed"
+    category: str = "custom"
     role: str
     expertise: List[str] = []
     perspective: str = ""
@@ -52,9 +61,16 @@ class CreatePersonalityRequest(BaseModel):
     name: str
     role: str
     type: str = "detailed"
+    category: str = "custom"
     expertise: List[str] = []
     perspective: str = ""
     communication_style: str = ""
+
+
+class CategoryInfo(BaseModel):
+    """Category information."""
+    id: str
+    display_name: str
 
 
 class CreateConversationRequest(BaseModel):
@@ -119,10 +135,19 @@ async def get_config():
     }
 
 
+@app.get("/api/personalities/categories", response_model=List[CategoryInfo])
+async def get_personality_categories():
+    """Get all available personality categories."""
+    return personalities.get_categories()
+
+
 @app.get("/api/personalities", response_model=List[Personality])
-async def list_personalities(type_filter: Optional[str] = None):
-    """List all personalities with optional type filter."""
-    results = personalities.list_personalities(type_filter=type_filter)
+async def list_personalities(
+    type_filter: Optional[str] = None,
+    category: Optional[str] = None
+):
+    """List all personalities with optional type and category filters."""
+    results = personalities.list_personalities(type_filter=type_filter, category_filter=category)
     return [Personality(**p) for p in results]
 
 
@@ -143,6 +168,7 @@ async def create_personality(request: CreatePersonalityRequest):
             name=request.name,
             role=request.role,
             personality_type=request.type,
+            category=request.category,
             expertise=request.expertise,
             perspective=request.perspective,
             communication_style=request.communication_style
@@ -155,18 +181,22 @@ async def create_personality(request: CreatePersonalityRequest):
 @app.put("/api/personalities/{personality_id}", response_model=Personality)
 async def update_personality(personality_id: str, request: CreatePersonalityRequest):
     """Update an existing personality."""
-    updated = personalities.update_personality(
-        personality_id,
-        name=request.name,
-        role=request.role,
-        type=request.type,
-        expertise=request.expertise,
-        perspective=request.perspective,
-        communication_style=request.communication_style
-    )
-    if updated is None:
-        raise HTTPException(status_code=404, detail="Personality not found")
-    return Personality(**updated)
+    try:
+        updated = personalities.update_personality(
+            personality_id,
+            name=request.name,
+            role=request.role,
+            type=request.type,
+            category=request.category,
+            expertise=request.expertise,
+            perspective=request.perspective,
+            communication_style=request.communication_style
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Personality not found")
+        return Personality(**updated)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.delete("/api/personalities/{personality_id}")
@@ -335,6 +365,7 @@ async def send_message_stream(conversation_id: str, request: MessageRequest):
     """
     Send a message and stream the response with mode routing.
     Returns Server-Sent Events as each stage completes.
+    Supports cancellation via client disconnect.
     """
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
@@ -418,6 +449,9 @@ async def send_message_stream(conversation_id: str, request: MessageRequest):
                 # Send completion event
                 yield f"data: {json.dumps({'type': 'complete', 'mode': 'council'})}\n\n"
 
+        except asyncio.CancelledError:
+            # Client disconnected - send cancellation event and clean up
+            yield f"data: {json.dumps({'type': 'cancelled', 'message': 'Request cancelled'})}\n\n"
         except Exception as e:
             # Send error event
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"

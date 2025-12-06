@@ -9,6 +9,7 @@ import './ChatInterface.css';
 export default function ChatInterface({
   conversation,
   onSendMessage,
+  onCancelRequest,     // () => void - cancels in-progress request
   isLoading,
   documents,           // Array of document metadata
   onDocumentUpload,    // (file) => Promise
@@ -199,6 +200,12 @@ export default function ChatInterface({
                         <ReactMarkdown>{msg.chairman_response.response}</ReactMarkdown>
                       </div>
                     </div>
+                  ) : msg.cancelled ? (
+                    // Cancelled response
+                    <div className="cancelled-response">
+                      <span className="cancelled-badge">Cancelled</span>
+                      <span className="cancelled-text">Response was cancelled by user</span>
+                    </div>
                   ) : null}
                 </div>
               )}
@@ -210,6 +217,14 @@ export default function ChatInterface({
           <div className="loading-indicator">
             <div className="spinner"></div>
             <span>Consulting the council...</span>
+            <button
+              type="button"
+              className="cancel-button"
+              onClick={onCancelRequest}
+              title="Cancel request"
+            >
+              Cancel
+            </button>
           </div>
         )}
 

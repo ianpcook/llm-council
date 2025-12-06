@@ -72,6 +72,49 @@
   font-size: 14px;
 }
 
+.cancel-button {
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid #e74c3c;
+  border-radius: 4px;
+  color: #e74c3c;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: auto;
+}
+
+.cancel-button:hover {
+  background: #e74c3c;
+  color: white;
+}
+
+.cancelled-response {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: #fff5f5;
+  border-radius: 8px;
+  border-left: 3px solid #e74c3c;
+}
+
+.cancelled-badge {
+  background: #e74c3c;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.cancelled-text {
+  font-size: 14px;
+  color: #666;
+  font-style: italic;
+}
+
 .stage-loading {
   display: flex;
   align-items: center;

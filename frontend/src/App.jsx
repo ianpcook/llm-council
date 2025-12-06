@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import CouncilConfigPanel from './components/CouncilConfigPanel';
@@ -16,6 +16,9 @@ function App() {
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [showPersonalityManager, setShowPersonalityManager] = useState(false);
   const [documents, setDocuments] = useState([]);
+
+  // AbortController ref for cancelling in-progress requests
+  const abortControllerRef = useRef(null);
 
   // Load conversations on mount
   useEffect(() => {
@@ -156,8 +159,19 @@ function App() {
     }
   };
 
+  const handleCancelRequest = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  };
+
   const handleSendMessage = async (content, mode, includeDocuments = true) => {
     if (!currentConversationId) return;
+
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
 
     setIsLoading(true);
     try {
@@ -202,7 +216,7 @@ function App() {
         messages: [...prev.messages, assistantMessage],
       }));
 
-      // Send message with streaming, passing the mode and includeDocuments
+      // Send message with streaming, passing the mode, includeDocuments, and abort signal
       await api.sendMessageStream(currentConversationId, content, effectiveMode, (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
@@ -297,13 +311,50 @@ function App() {
           case 'error':
             console.error('Stream error:', event.message);
             setIsLoading(false);
+            abortControllerRef.current = null;
+            break;
+
+          case 'cancelled':
+            // Request was cancelled by user - mark loading states as complete
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              if (lastMsg.loading) {
+                lastMsg.loading = { stage1: false, stage2: false, stage3: false };
+                lastMsg.cancelled = true;
+              } else if (lastMsg.isLoading) {
+                lastMsg.isLoading = false;
+                lastMsg.cancelled = true;
+              }
+              return { ...prev, messages };
+            });
+            setIsLoading(false);
+            abortControllerRef.current = null;
             break;
 
           default:
             console.log('Unknown event type:', eventType);
         }
-      }, includeDocuments);
+      }, includeDocuments, signal);
     } catch (error) {
+      // Handle abort errors gracefully
+      if (error.name === 'AbortError') {
+        setCurrentConversation((prev) => {
+          const messages = [...prev.messages];
+          const lastMsg = messages[messages.length - 1];
+          if (lastMsg.loading) {
+            lastMsg.loading = { stage1: false, stage2: false, stage3: false };
+            lastMsg.cancelled = true;
+          } else if (lastMsg.isLoading) {
+            lastMsg.isLoading = false;
+            lastMsg.cancelled = true;
+          }
+          return { ...prev, messages };
+        });
+        setIsLoading(false);
+        abortControllerRef.current = null;
+        return;
+      }
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error
       setCurrentConversation((prev) => ({
@@ -311,6 +362,7 @@ function App() {
         messages: prev.messages.slice(0, -2),
       }));
       setIsLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -327,6 +379,7 @@ function App() {
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
+        onCancelRequest={handleCancelRequest}
         isLoading={isLoading}
         documents={documents}
         onDocumentUpload={handleDocumentUpload}
