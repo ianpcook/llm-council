@@ -23,6 +23,62 @@
   gap: 10px;
 }
 
+/* Category Filter */
+.category-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.category-tab {
+  padding: 6px 14px;
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 20px;
+  font-size: 13px;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.category-tab:hover {
+  background: #e8e8e8;
+  color: #333;
+}
+
+.category-tab.active {
+  background: #4a90e2;
+  border-color: #4a90e2;
+  color: white;
+}
+
+/* Personality Groups */
+.personality-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.personality-group {
+  background: #fafafa;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.personality-group-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #4a90e2;
+  margin: 0 0 12px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e8f4fc;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 /* Personality List */
 .personality-list {
   display: grid;
@@ -167,6 +223,15 @@
 }
 
 /* Form */
+.form-row {
+  display: flex;
+  gap: 16px;
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
 .form-group {
   margin-bottom: 16px;
 }

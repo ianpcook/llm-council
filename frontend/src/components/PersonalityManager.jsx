@@ -4,6 +4,8 @@ import './PersonalityManager.css';
 
 function PersonalityManager({ onClose }) {
   const [personalities, setPersonalities] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
@@ -12,6 +14,7 @@ function PersonalityManager({ onClose }) {
     name: '',
     role: '',
     type: 'detailed',
+    category: 'custom',
     expertise: '',
     perspective: '',
     communication_style: ''
@@ -22,13 +25,23 @@ function PersonalityManager({ onClose }) {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
+    loadCategories();
     loadPersonalities();
   }, []);
 
-  const loadPersonalities = async () => {
+  const loadCategories = async () => {
+    try {
+      const data = await api.getPersonalityCategories();
+      setCategories(data);
+    } catch (err) {
+      console.error('Failed to load categories:', err);
+    }
+  };
+
+  const loadPersonalities = async (category = null) => {
     try {
       setLoading(true);
-      const data = await api.listPersonalities();
+      const data = await api.listPersonalities(category);
       setPersonalities(data);
       setError(null);
     } catch (err) {
@@ -39,12 +52,31 @@ function PersonalityManager({ onClose }) {
     }
   };
 
+  const handleCategoryFilter = (categoryId) => {
+    setSelectedCategory(categoryId);
+    loadPersonalities(categoryId);
+  };
+
+  // Group personalities by category for display
+  const groupedPersonalities = personalities.reduce((acc, p) => {
+    const cat = p.category || 'custom';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(p);
+    return acc;
+  }, {});
+
+  const getCategoryDisplayName = (categoryId) => {
+    const cat = categories.find(c => c.id === categoryId);
+    return cat ? cat.display_name : categoryId;
+  };
+
   const handleCreate = () => {
     setEditingPersonality(null);
     setFormData({
       name: '',
       role: '',
       type: 'detailed',
+      category: 'custom',
       expertise: '',
       perspective: '',
       communication_style: ''
@@ -59,6 +91,7 @@ function PersonalityManager({ onClose }) {
       name: personality.name,
       role: personality.role,
       type: personality.type,
+      category: personality.category || 'custom',
       expertise: personality.expertise.join(', '),
       perspective: personality.perspective || '',
       communication_style: personality.communication_style || ''
@@ -107,6 +140,7 @@ function PersonalityManager({ onClose }) {
         name: formData.name,
         role: formData.role,
         type: formData.type,
+        category: formData.category,
         expertise: formData.expertise.split(',').map(s => s.trim()).filter(s => s),
         perspective: formData.perspective,
         communication_style: formData.communication_style
@@ -119,7 +153,7 @@ function PersonalityManager({ onClose }) {
       }
 
       setShowModal(false);
-      loadPersonalities();
+      loadPersonalities(selectedCategory);
     } catch (err) {
       console.error('Failed to save personality:', err);
       setFormErrors({ submit: 'Failed to save personality' });
@@ -152,38 +186,94 @@ function PersonalityManager({ onClose }) {
 
       {error && <div className="form-error">{error}</div>}
 
+      {/* Category filter tabs */}
+      <div className="category-filter">
+        <button
+          className={`category-tab ${selectedCategory === null ? 'active' : ''}`}
+          onClick={() => handleCategoryFilter(null)}
+        >
+          All
+        </button>
+        {categories.map(cat => (
+          <button
+            key={cat.id}
+            className={`category-tab ${selectedCategory === cat.id ? 'active' : ''}`}
+            onClick={() => handleCategoryFilter(cat.id)}
+          >
+            {cat.display_name}
+          </button>
+        ))}
+      </div>
+
       {personalities.length === 0 ? (
         <div className="empty-state">
-          <p>No personalities yet.</p>
+          <p>No personalities {selectedCategory ? 'in this category' : 'yet'}.</p>
           <button className="btn btn-primary" onClick={handleCreate}>
             Create your first personality
           </button>
         </div>
       ) : (
-        <div className="personality-list">
-          {personalities.map((personality) => (
-            <div key={personality.id} className="personality-card">
-              <div className="personality-card-header">
-                <h3 className="personality-card-name">{personality.name}</h3>
-                <span className="personality-card-type">{personality.type}</span>
+        <div className="personality-groups">
+          {selectedCategory === null ? (
+            // Grouped view when showing all
+            Object.entries(groupedPersonalities).map(([categoryId, categoryPersonalities]) => (
+              <div key={categoryId} className="personality-group">
+                <h3 className="personality-group-title">{getCategoryDisplayName(categoryId)}</h3>
+                <div className="personality-list">
+                  {categoryPersonalities.map((personality) => (
+                    <div key={personality.id} className="personality-card">
+                      <div className="personality-card-header">
+                        <h3 className="personality-card-name">{personality.name}</h3>
+                        <span className="personality-card-type">{personality.type}</span>
+                      </div>
+                      <p className="personality-card-role">{personality.role}</p>
+                      <div className="personality-card-actions">
+                        <button
+                          className="btn btn-secondary btn-small"
+                          onClick={() => handleEdit(personality)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="btn btn-danger btn-small"
+                          onClick={() => handleDelete(personality)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <p className="personality-card-role">{personality.role}</p>
-              <div className="personality-card-actions">
-                <button
-                  className="btn btn-secondary btn-small"
-                  onClick={() => handleEdit(personality)}
-                >
-                  Edit
-                </button>
-                <button
-                  className="btn btn-danger btn-small"
-                  onClick={() => handleDelete(personality)}
-                >
-                  Delete
-                </button>
-              </div>
+            ))
+          ) : (
+            // Flat list when filtered by category
+            <div className="personality-list">
+              {personalities.map((personality) => (
+                <div key={personality.id} className="personality-card">
+                  <div className="personality-card-header">
+                    <h3 className="personality-card-name">{personality.name}</h3>
+                    <span className="personality-card-type">{personality.type}</span>
+                  </div>
+                  <p className="personality-card-role">{personality.role}</p>
+                  <div className="personality-card-actions">
+                    <button
+                      className="btn btn-secondary btn-small"
+                      onClick={() => handleEdit(personality)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="btn btn-danger btn-small"
+                      onClick={() => handleDelete(personality)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -206,15 +296,29 @@ function PersonalityManager({ onClose }) {
               {formErrors.name && <div className="form-error">{formErrors.name}</div>}
             </div>
 
-            <div className="form-group">
-              <label>Type</label>
-              <select
-                value={formData.type}
-                onChange={e => setFormData({...formData, type: e.target.value})}
-              >
-                <option value="detailed">Detailed</option>
-                <option value="simple">Simple</option>
-              </select>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Type</label>
+                <select
+                  value={formData.type}
+                  onChange={e => setFormData({...formData, type: e.target.value})}
+                >
+                  <option value="detailed">Detailed</option>
+                  <option value="simple">Simple</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label>Category</label>
+                <select
+                  value={formData.category}
+                  onChange={e => setFormData({...formData, category: e.target.value})}
+                >
+                  {categories.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.display_name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="form-group">
